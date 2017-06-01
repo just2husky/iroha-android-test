@@ -17,6 +17,7 @@ limitations under the License.
 
 package io.soramitsu.iroha.view.activity;
 
+import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
 import android.databinding.DataBindingUtil;
@@ -42,18 +43,28 @@ import android.view.ViewGroup;
 import android.view.ViewTreeObserver;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import com.mikepenz.aboutlibraries.LibsBuilder;
 import com.mikepenz.aboutlibraries.ui.LibsSupportFragment;
 
+import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
+import java.util.List;
+import java.util.Map;
+
 import cn.pedant.SweetAlert.SweetAlertDialog;
 import io.soramitsu.iroha.R;
 import io.soramitsu.iroha.databinding.ActivityMainBinding;
+import io.soramitsu.iroha.model.TransactionHistory;
 import io.soramitsu.iroha.navigator.Navigator;
 import io.soramitsu.iroha.view.fragment.AssetReceiveFragment;
 import io.soramitsu.iroha.view.fragment.AssetSenderFragment;
 import io.soramitsu.iroha.view.fragment.TransactionFragment;
 import io.soramitsu.iroha.view.fragment.WalletFragment;
+import io.soramitsu.irohaandroid.Iroha;
+import io.soramitsu.irohaandroid.callback.Callback;
+import io.soramitsu.irohaandroid.callback.Func2;
 import io.soramitsu.irohaandroid.model.Account;
 import io.soramitsu.irohaandroid.model.Transaction;
 
@@ -218,9 +229,71 @@ public class MainActivity extends AppCompatActivity {
                                 binding.navigation.getMenu().getItem(2).setChecked(true);
                                 break;
                             case R.id.action_get_transaction:
+                                if (isChecked) break;
                                 binding.bottomNavigation.setVisibility(View.GONE);
                                 binding.toolbar.setTitle(getString(R.string.get_transaction));
-                                replaceFragment(new TransactionFragment());
+
+                                Iroha iroha = Iroha.getInstance();
+                                try {
+                                    iroha.runParallelAsyncTask(
+                                            getGlobleActivity(),
+                                            "UserInfo",
+                                            iroha.findAccountFunction(uuid),
+                                            "Transaction",
+                                            iroha.findTransactionHistoryFunction(uuid, 30, 0),
+                                            new Func2<Account, List<Transaction>, TransactionHistory>() {
+                                                @Override
+                                                public TransactionHistory call(Account account, List<Transaction> transactions) {
+                                                    TransactionHistory transactionHistory = new TransactionHistory();
+                                                    if (account != null && account.assets != null && !account.assets.isEmpty()) {
+                                                        transactionHistory.value = account.assets.get(0).value;
+                                                    }
+                                                    transactionHistory.histories = transactions;
+                                                    return transactionHistory;
+                                                }
+                                            },
+                                            new Callback<TransactionHistory>() {
+                                                @Override
+                                                public void onSuccessful(TransactionHistory result) {
+                                                    // Success!
+
+                                                    Toast.makeText(getApplicationContext(), "value: " + result.value,
+                                                            Toast.LENGTH_SHORT).show();
+                                                    Toast.makeText(getApplicationContext(), "Transaction list len: " + result.histories.size(),
+                                                            Toast.LENGTH_SHORT).show();
+                                                    for(int index=0; index<result.histories.size();index++) {
+                                                        Toast.makeText(getApplicationContext(), "Transaction" + index +": " + formatTransaction(result.histories.get(index)),
+                                                                Toast.LENGTH_SHORT).show();
+                                                    }
+
+                                                    Toast.makeText(getApplicationContext(), "Success!",
+                                                            Toast.LENGTH_SHORT).show();
+                                                }
+
+                                                @Override
+                                                public void onFailure(Throwable throwable) {
+                                                    // Error!
+                                                    Toast.makeText(getApplicationContext(), "Error!",
+                                                            Toast.LENGTH_SHORT).show();
+                                                }
+                                            }
+                                    );
+                                } catch (ClassNotFoundException e) {
+                                    e.printStackTrace();
+                                } catch (IllegalAccessException e) {
+                                    e.printStackTrace();
+                                } catch (InvocationTargetException e) {
+                                    e.printStackTrace();
+                                } catch (NoSuchMethodException e) {
+                                    e.printStackTrace();
+                                } catch (NoSuchFieldException e) {
+                                    e.printStackTrace();
+                                }
+
+//                                Toast.makeText(getApplicationContext(), "Toast Test",
+//                                        Toast.LENGTH_SHORT).show();
+
+                                replaceFragment(transactionFragment);
                                 allClearNavigationMenuChecked();
                                 binding.navigation.getMenu().getItem(3).setChecked(true);
 //                                if (isChecked) break;
@@ -234,6 +307,13 @@ public class MainActivity extends AppCompatActivity {
                     }
                 }
         );
+    }
+
+    public String formatTransaction(Transaction transaction) {
+        return "[ assetUuid: " + transaction.assetUuid + ",\n" +
+                "assetName:" + transaction.assetName + ",\n" +
+                "OperationParameter:" + transaction.params + ",\n" +
+                "signature:" + transaction.signature + " ]\n";
     }
 
     private void initBottomNavigationView() {
@@ -298,6 +378,7 @@ public class MainActivity extends AppCompatActivity {
         assetReceiveFragment = (AssetReceiveFragment) manager.findFragmentByTag(AssetReceiveFragment.TAG);
         walletFragment = (WalletFragment) manager.findFragmentByTag(WalletFragment.TAG);
         assetSenderFragment = (AssetSenderFragment) manager.findFragmentByTag(AssetSenderFragment.TAG);
+        transactionFragment = (TransactionFragment) manager.findFragmentByTag(TransactionFragment.TAG);
 
         if (assetReceiveFragment == null) {
             assetReceiveFragment = AssetReceiveFragment.newInstance(uuid);
@@ -315,6 +396,9 @@ public class MainActivity extends AppCompatActivity {
                     .withAboutDescription(getString(R.string.library_description))
                     .withLibraries("iroha_android")
                     .supportFragment();
+        }
+        if (transactionFragment == null) {
+            transactionFragment = TransactionFragment.newInstance(uuid);
         }
 
         if (savedInstanceState == null) {
@@ -371,5 +455,25 @@ public class MainActivity extends AppCompatActivity {
                         listener.onVisibilityChanged(isOpen);
                     }
                 });
+    }
+
+    public static Activity getGlobleActivity() throws ClassNotFoundException, IllegalArgumentException, SecurityException, IllegalAccessException, InvocationTargetException, NoSuchMethodException, NoSuchFieldException {
+        Class activityThreadClass = Class.forName("android.app.ActivityThread");
+        Object activityThread = activityThreadClass.getMethod("currentActivityThread").invoke(null);
+        Field activitiesField = activityThreadClass.getDeclaredField("mActivities");
+        activitiesField.setAccessible(true);
+        Map activities = (Map) activitiesField.get(activityThread);
+        for(Object activityRecord:activities.values()) {
+            Class activityRecordClass = activityRecord.getClass();
+            Field pausedField = activityRecordClass.getDeclaredField("paused");
+            pausedField.setAccessible(true);
+            if(!pausedField.getBoolean(activityRecord)) {
+                Field activityField = activityRecordClass.getDeclaredField("activity");
+                activityField.setAccessible(true);
+                Activity activity = (Activity) activityField.get(activityRecord);
+                return activity;
+        }
+        }
+        return null;
     }
 }
