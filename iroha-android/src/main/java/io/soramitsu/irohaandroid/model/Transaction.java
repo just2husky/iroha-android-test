@@ -129,5 +129,11 @@ public class Transaction implements Serializable {
         public String receiver;
         public String oppoent;
         public long timestamp;
+
+        @Override
+        public String toString() {
+            return "[ command: " + command + ",\n value: " + value + ",\n sender: " + sender +
+                    ",\n receiver: " + receiver + ",\n oppoent: " + oppoent + ",\n timestamp: " + timestamp + " ]\n";
+        }
     }
 }
